@@ -1,0 +1,6 @@
+{
+  "name": "Vanguard Opportunity Intelligence Platform",
+  "description": "AI-native opportunity intelligence platform discovering, verifying, scoring, and publishing real global and African grants, fellowships, competitions, and funding calls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
