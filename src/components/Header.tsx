@@ -88,14 +88,14 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             </nav>
 
-            {/* Subtle Admin Entrance */}
+            {/* Admin Entrance */}
             <button
               onClick={() => onViewChange(isAuthenticatedAdmin ? 'admin' : 'admin-login')}
-              className="flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 px-2 py-1 rounded transition-colors"
-              title="Administrator Sign In"
+              className="flex items-center gap-1.5 text-xs font-medium text-slate-300 hover:text-emerald-300 bg-slate-900/80 border border-slate-800 hover:border-emerald-500/40 px-2.5 py-1.5 rounded-lg transition-all shadow-xs"
+              title={isAuthenticatedAdmin ? 'Open Admin Console' : 'Administrator Sign In'}
             >
-              <Lock className="h-3.5 w-3.5 text-slate-400" />
-              <span className="hidden sm:inline">Admin</span>
+              <Lock className="h-3.5 w-3.5 text-emerald-400" />
+              <span>Admin</span>
             </button>
           </div>
         )}

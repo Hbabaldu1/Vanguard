@@ -29,7 +29,18 @@ export const AdminMetrics: React.FC<AdminMetricsProps> = ({
   onScanNow,
   isScanning,
 }) => {
-  if (!metrics) return null;
+  if (!metrics) {
+    return (
+      <div className="space-y-4 animate-pulse">
+        <div className="h-20 rounded-xl border border-slate-800 bg-slate-900/60 p-4" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
+            <div key={i} className="h-24 rounded-xl border border-slate-800 bg-slate-900/40 p-4" />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   const isPaused = metrics.schedulerState?.isPaused || metrics.qualitySettings?.emergencyPause;
   const pubMode = metrics.qualitySettings?.publishingMode || 'approval';

@@ -24,8 +24,27 @@ import {
 } from 'lucide-react';
 
 export default function App() {
-  // Navigation & View States
-  const [currentView, setCurrentView] = useState<'feed' | 'bookmarks' | 'archive' | 'admin' | 'admin-login'>('feed');
+  // Navigation & View States with URL hash synchronization
+  const [currentView, setCurrentView] = useState<'feed' | 'bookmarks' | 'archive' | 'admin' | 'admin-login'>(() => {
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash.toLowerCase();
+      const path = window.location.pathname.toLowerCase();
+      const token = localStorage.getItem('vanguard_admin_token');
+      if (hash === '#admin' || path === '/admin') {
+        return token ? 'admin' : 'admin-login';
+      }
+      if (hash === '#admin-login' || path === '/admin-login') {
+        return 'admin-login';
+      }
+      if (hash === '#bookmarks' || path === '/bookmarks') {
+        return 'bookmarks';
+      }
+      if (hash === '#archive' || path === '/archive') {
+        return 'archive';
+      }
+    }
+    return 'feed';
+  });
   const [adminTab, setAdminTab] = useState<'metrics' | 'review' | 'sources' | 'settings' | 'destinations' | 'audit' | 'tests'>('metrics');
 
   // Authentication State
@@ -130,14 +149,36 @@ export default function App() {
     showToast('Administrator logged out successfully.');
   };
 
-  // View switch interceptor
+  // View switch interceptor with hash synchronization
   const handleViewChange = (view: 'feed' | 'bookmarks' | 'archive' | 'admin' | 'admin-login') => {
     if (view === 'admin' && !adminToken) {
       setCurrentView('admin-login');
+      window.location.hash = 'admin-login';
     } else {
       setCurrentView(view);
+      window.location.hash = view === 'feed' ? '' : view;
     }
   };
+
+  // Sync state if user clicks browser back/forward buttons
+  useEffect(() => {
+    const handleHash = () => {
+      const hash = window.location.hash.replace('#', '').toLowerCase();
+      if (hash === 'admin') {
+        setCurrentView(adminToken ? 'admin' : 'admin-login');
+      } else if (hash === 'admin-login') {
+        setCurrentView('admin-login');
+      } else if (hash === 'bookmarks') {
+        setCurrentView('bookmarks');
+      } else if (hash === 'archive') {
+        setCurrentView('archive');
+      } else if (hash === 'feed' || !hash) {
+        setCurrentView('feed');
+      }
+    };
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, [adminToken]);
 
   // Fetch Opportunities Feed
   const fetchOpportunities = useCallback(async () => {
@@ -214,7 +255,7 @@ export default function App() {
     if (!adminToken) return;
 
     try {
-      const [metricsRes, reviewRes, sourcesRes, destRes, auditRes, settingsRes] = await Promise.all([
+      const results = await Promise.allSettled([
         adminFetch('/api/admin/metrics'),
         adminFetch('/api/admin/review-queue'),
         adminFetch('/api/admin/sources'),
@@ -223,41 +264,53 @@ export default function App() {
         adminFetch('/api/admin/settings'),
       ]);
 
-      if (metricsRes.status === 401) {
-        handleLogout();
-        return;
+      const [metricsRes, reviewRes, sourcesRes, destRes, auditRes, settingsRes] = results;
+
+      // Check if any returned 401 Unauthorized
+      for (const res of results) {
+        if (res.status === 'fulfilled' && res.value.status === 401) {
+          handleLogout();
+          return;
+        }
       }
 
-      if (metricsRes.ok) {
-        const mData = await metricsRes.json();
+      if (metricsRes.status === 'fulfilled' && metricsRes.value.ok) {
+        const mData = await metricsRes.value.json();
         setAdminMetrics(mData);
-        setSchedulerHealth(mData.schedulerState);
+        if (mData.schedulerState) {
+          setSchedulerHealth(mData.schedulerState);
+        }
       }
-      if (reviewRes.ok) {
-        const rData = await reviewRes.json();
+
+      if (reviewRes.status === 'fulfilled' && reviewRes.value.ok) {
+        const rData = await reviewRes.value.json();
         setReviewQueue(rData.items || []);
       }
-      if (sourcesRes.ok) {
-        const sData = await sourcesRes.json();
+
+      if (sourcesRes.status === 'fulfilled' && sourcesRes.value.ok) {
+        const sData = await sourcesRes.value.json();
         setSources(sData.sources || []);
       }
-      if (destRes.ok) {
-        const dData = await destRes.json();
+
+      if (destRes.status === 'fulfilled' && destRes.value.ok) {
+        const dData = await destRes.value.json();
         setDestinations(dData.destinations || []);
       }
-      if (auditRes.ok) {
-        const aData = await auditRes.json();
+
+      if (auditRes.status === 'fulfilled' && auditRes.value.ok) {
+        const aData = await auditRes.value.json();
         setAuditLogs(aData.logs || []);
       }
-      if (settingsRes.ok) {
-        const stData = await settingsRes.json();
+
+      if (settingsRes.status === 'fulfilled' && settingsRes.value.ok) {
+        const stData = await settingsRes.value.json();
         setQualitySettings(stData.settings);
         setSchedulerHealth(stData.scheduler);
       }
     } catch (err) {
       console.error('Admin fetch error:', err);
     }
-  }, [adminToken, adminFetch]);
+  }, [adminToken, adminFetch, handleLogout]);
 
   // Manual Discovery Trigger
   const handleTriggerDiscovery = async () => {
@@ -419,13 +472,13 @@ export default function App() {
 
       {/* Main View Container */}
       <main className="flex-1 w-full max-w-7xl mx-auto px-4 py-6 sm:px-6">
-        {currentView === 'admin-login' ? (
+        {currentView === 'admin-login' || (currentView === 'admin' && !adminToken) ? (
           /* =========================================================================
              SECURE ADMIN LOGIN VIEW
              ========================================================================= */
           <AdminLogin
             onLoginSuccess={handleLoginSuccess}
-            onCancel={() => setCurrentView('feed')}
+            onCancel={() => handleViewChange('feed')}
           />
         ) : currentView === 'admin' && adminToken ? (
           /* =========================================================================
@@ -543,12 +596,19 @@ export default function App() {
               />
             )}
 
-            {adminTab === 'settings' && qualitySettings && schedulerHealth && (
-              <AdminSettings
-                settings={qualitySettings}
-                scheduler={schedulerHealth}
-                onUpdateSettings={handleUpdateSettings}
-              />
+            {adminTab === 'settings' && (
+              qualitySettings && schedulerHealth ? (
+                <AdminSettings
+                  settings={qualitySettings}
+                  scheduler={schedulerHealth}
+                  onUpdateSettings={handleUpdateSettings}
+                />
+              ) : (
+                <div className="space-y-4 animate-pulse">
+                  <div className="h-10 bg-slate-900 rounded-lg w-1/3" />
+                  <div className="h-64 rounded-xl border border-slate-800 bg-slate-900/40 p-6" />
+                </div>
+              )
             )}
 
             {adminTab === 'destinations' && (
