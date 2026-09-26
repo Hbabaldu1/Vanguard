@@ -1,54 +1,39 @@
 import 'dotenv/config';
 import express from 'express';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer as createViteServer } from 'vite';
+import { getApp } from './server/app.js';
 import { getDatabase } from './server/db/database.js';
-import { initScheduler, runDiscoveryCycle } from './server/pipeline/scheduler.js';
-import { createApiRouter } from './server/routes/api.js';
+import { initScheduler } from './server/pipeline/scheduler.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function startServer() {
-  const app = express();
+  const app = await getApp();
   const port = Number(process.env.PORT) || 3000;
 
-  app.use(express.json());
-
-  // CORS middleware for separate frontend hosting (Vercel, custom domain)
-  app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', process.env.FRONTEND_URL || '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-    if (req.method === 'OPTIONS') {
-      return res.sendStatus(200);
-    }
-    next();
-  });
-
-  console.log('[Server] Initializing Vanguard Opportunity Intelligence database...');
-  const db = await getDatabase();
-
-  // Initialize persistent backend discovery scheduler
-  initScheduler(db);
-
-  // Mount API router
-  app.use('/api', createApiRouter(db));
-
-  // Health endpoint
-  app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', service: 'Vanguard Opportunity Intelligence Platform' });
-  });
+  // Initialize scheduler for persistent Node server runtimes
+  if (!process.env.VERCEL) {
+    const db = await getDatabase();
+    initScheduler(db);
+  }
 
   // Serve Frontend
-  if (process.env.NODE_ENV === 'production') {
-    const distPath = path.resolve(__dirname, 'dist');
+  const distPath = path.resolve(__dirname, 'dist');
+  const indexPath = path.join(distPath, 'index.html');
+
+  if (process.env.NODE_ENV === 'production' && fs.existsSync(indexPath)) {
     app.use(express.static(distPath));
     app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      res.sendFile(indexPath);
     });
   } else {
+    if (process.env.NODE_ENV === 'production') {
+      console.warn('[Server] dist/index.html not found, mounting Vite middleware dynamically');
+    }
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',

@@ -5,8 +5,14 @@ import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DATA_DIR = path.resolve(__dirname, '../../data');
-const DB_FILE = path.join(DATA_DIR, 'opportunities.db');
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const BUNDLED_DATA_DIR = path.resolve(__dirname, '../../data');
+const BUNDLED_DB_FILE = path.join(BUNDLED_DATA_DIR, 'opportunities.db');
+
+// In serverless environments (like Vercel), project files are read-only.
+// We read bundled seed data and write to writable /tmp storage.
+const DATA_DIR = isServerless ? '/tmp' : BUNDLED_DATA_DIR;
+const DB_FILE = isServerless ? path.join('/tmp', 'opportunities.db') : BUNDLED_DB_FILE;
 
 let dbInstance: SqlJsDatabase | null = null;
 let saveDebounceTimer: NodeJS.Timeout | null = null;
@@ -17,17 +23,51 @@ export async function getDatabase(): Promise<SqlJsDatabase> {
   }
 
   if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    } catch {
+      // Ignore if directory creation is restricted
+    }
   }
 
-  const SQL = await initSqlJs();
+  // Locate wasm file reliably across dev, container, and serverless environments
+  const SQL = await initSqlJs({
+    locateFile: (file) => {
+      const candidates = [
+        path.resolve(__dirname, '../../node_modules/sql.js/dist', file),
+        path.resolve(process.cwd(), 'node_modules/sql.js/dist', file),
+        path.resolve('/var/task/node_modules/sql.js/dist', file)
+      ];
+      for (const p of candidates) {
+        if (fs.existsSync(p)) return p;
+      }
+      return file;
+    }
+  });
+
+  let fileBuffer: Buffer | null = null;
 
   if (fs.existsSync(DB_FILE)) {
     try {
-      const fileBuffer = fs.readFileSync(DB_FILE);
+      fileBuffer = fs.readFileSync(DB_FILE);
+    } catch (err) {
+      console.warn('Notice: Could not read local DB_FILE, checking bundled DB:', err);
+    }
+  }
+
+  if (!fileBuffer && fs.existsSync(BUNDLED_DB_FILE)) {
+    try {
+      fileBuffer = fs.readFileSync(BUNDLED_DB_FILE);
+    } catch (err) {
+      console.warn('Notice: Could not read BUNDLED_DB_FILE:', err);
+    }
+  }
+
+  if (fileBuffer) {
+    try {
       dbInstance = new SQL.Database(fileBuffer);
     } catch (err) {
-      console.error('Failed to load existing DB, creating fresh DB:', err);
+      console.error('Failed to parse existing DB buffer, initializing fresh DB:', err);
       dbInstance = new SQL.Database();
     }
   } else {
@@ -48,7 +88,8 @@ export function persistDatabase(): void {
     const buffer = Buffer.from(data);
     fs.writeFileSync(DB_FILE, buffer);
   } catch (err) {
-    console.error('Error persisting SQLite database to disk:', err);
+    // Non-fatal warning if persisting to disk is unavailable (e.g. read-only serverless layer)
+    console.warn('Warning: Could not persist SQLite database to disk:', err);
   }
 }
 

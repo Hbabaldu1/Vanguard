@@ -647,6 +647,28 @@ export function createApiRouter(db: SqlJsDatabase): Router {
     }
   });
 
+  // Automated Vercel Cron endpoint (e.g. invoked every 15 minutes by Vercel Cron)
+  router.all('/cron/discover', async (req: Request, res: Response) => {
+    try {
+      const cronSecret = process.env.CRON_SECRET;
+      const authHeader = req.headers.authorization;
+      if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+        return res.status(401).json({ error: 'Unauthorized cron request' });
+      }
+
+      console.log('[Vercel Cron] Running scheduled discovery cycle...');
+      const result = await runDiscoveryCycle(db);
+      return res.json({
+        success: true,
+        triggered_at: new Date().toISOString(),
+        ...result,
+      });
+    } catch (err: any) {
+      console.error('[Vercel Cron] Discovery cycle failed:', err);
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   router.get('/admin/runs', (_req: Request, res: Response) => {
     try {
       const stmt = db.prepare(`
